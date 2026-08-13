@@ -1,51 +1,100 @@
 pipeline {
     agent any
 
+    parameters {
+        booleanParam(
+            name: 'BUILD_MOBILE',
+            defaultValue: false,
+            description: 'Set to true to execute native React Native mobile bundle verification (requires Node/React Native CLI on agent)'
+        )
+        string(
+            name: 'NODE_VERSION',
+            defaultValue: '18',
+            description: 'Target Node.js major version for pipeline execution'
+        )
+    }
+
     environment {
         CI = 'true'
         NODE_ENV = 'test'
-        BUILD_MOBILE = 'false' // Set to 'true' in Jenkins parameter if Android/iOS SDK tooling is available
+        JEST_JUNIT_OUTPUT_DIR = 'reports/junit'
+        JEST_JUNIT_OUTPUT_NAME = 'js-test-results.xml'
     }
 
     options {
         timeout(time: 30, unit: 'MINUTES')
         disableConcurrentBuilds()
         ansiColor('xterm')
+        buildDiscarder(logRotator(numToKeepStr: '30'))
     }
 
     stages {
-        stage('Checkout') {
+        stage('Checkout Source Code') {
             steps {
-                echo 'Checking out source code repository...'
+                echo '==================================================='
+                echo ' STAGE 1: Checking out source code repository...   '
+                echo '==================================================='
                 checkout scm
             }
         }
 
         stage('Install Dependencies') {
             steps {
-                echo 'Installing Node package dependencies cleanly with npm ci...'
-                sh 'npm ci || npm install'
+                echo '==================================================='
+                echo ' STAGE 2: Installing Node dependencies (npm ci)... '
+                echo '==================================================='
+                script {
+                    if (isUnix()) {
+                        sh 'npm ci || npm install'
+                    } else {
+                        bat 'npm ci || npm install'
+                    }
+                }
             }
         }
 
-        stage('TypeScript Verification') {
+        stage('TypeScript Static Check') {
             steps {
-                echo 'Running static TypeScript compilation check (tsc --noEmit)...'
-                sh 'npm run typecheck'
+                echo '==================================================='
+                echo ' STAGE 3: Verifying TypeScript types (tsc)...     '
+                echo '==================================================='
+                script {
+                    if (isUnix()) {
+                        sh 'npm run typecheck'
+                    } else {
+                        bat 'npm run typecheck'
+                    }
+                }
             }
         }
 
-        stage('ESLint Verification') {
+        stage('ESLint Code Quality') {
             steps {
-                echo 'Running ESLint code quality & style checks...'
-                sh 'npm run lint'
+                echo '==================================================='
+                echo ' STAGE 4: Executing ESLint style & quality check...'
+                echo '==================================================='
+                script {
+                    if (isUnix()) {
+                        sh 'npm run lint'
+                    } else {
+                        bat 'npm run lint'
+                    }
+                }
             }
         }
 
         stage('Unit & Component Tests') {
             steps {
-                echo 'Executing Jest headless unit and component tests with JUnit XML reporter...'
-                sh 'npm test -- --ci --reporters=default --reporters=jest-junit'
+                echo '==================================================='
+                echo ' STAGE 5: Running Jest unit & component tests...  '
+                echo '==================================================='
+                script {
+                    if (isUnix()) {
+                        sh 'npm test -- --ci --reporters=default --reporters=jest-junit'
+                    } else {
+                        bat 'npm test -- --ci --reporters=default --reporters=jest-junit'
+                    }
+                }
             }
             post {
                 always {
@@ -54,10 +103,18 @@ pipeline {
             }
         }
 
-        stage('Code Coverage Analysis') {
+        stage('Coverage Analysis') {
             steps {
-                echo 'Generating Jest test coverage report...'
-                sh 'npm run test:coverage'
+                echo '==================================================='
+                echo ' STAGE 6: Generating test coverage reports...     '
+                echo '==================================================='
+                script {
+                    if (isUnix()) {
+                        sh 'npm run test:coverage -- --ci'
+                    } else {
+                        bat 'npm run test:coverage -- --ci'
+                    }
+                }
             }
             post {
                 always {
@@ -66,13 +123,21 @@ pipeline {
             }
         }
 
-        stage('Mobile Native Build (Optional)') {
+        stage('Mobile Bundle Validation') {
             when {
-                environment name: 'BUILD_MOBILE', value: 'true'
+                expression { params.BUILD_MOBILE == true || env.BUILD_MOBILE == 'true' }
             }
             steps {
-                echo 'BUILD_MOBILE is set to true. Executing native React Native mobile build verification...'
-                sh 'npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output android-bundle.js'
+                echo '==================================================='
+                echo ' STAGE 7: Validating React Native mobile bundle... '
+                echo '==================================================='
+                script {
+                    if (isUnix()) {
+                        sh 'npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output android-bundle.js'
+                    } else {
+                        bat 'npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output android-bundle.js'
+                    }
+                }
             }
         }
     }
@@ -80,14 +145,14 @@ pipeline {
     post {
         success {
             echo '==================================================='
-            echo ' Jenkins CI/CD Pipeline Passed Successfully!       '
-            echo ' Respore Sence frontend source verified cleanly.    '
+            echo ' SUCCESS: Respore Sence CI/CD Pipeline Passed!      '
+            echo ' All TypeScript, ESLint, and Jest tests verified.  '
             echo '==================================================='
         }
         failure {
             echo '==================================================='
-            echo ' Jenkins CI/CD Pipeline Failed!                    '
-            echo ' Check log output and unit/typecheck reports.      '
+            echo ' FAILURE: Respore Sence CI/CD Pipeline Failed!     '
+            echo ' Inspect stage logs and JUnit test reports.        '
             echo '==================================================='
         }
     }
